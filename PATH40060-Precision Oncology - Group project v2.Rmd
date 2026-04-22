@@ -1,0 +1,189 @@
+---
+title: "PATH40060-Precision Oncology - Group Project
+output: html_document
+date: "2026-04-22"
+---
+
+```{r}
+
+# Define gene list
+
+genes_of_interest <- c( 
+  "VEGFA", "CA9", "BIRC5", "SLC2A1", "ADM", "PDK1",
+  "PROM1", "CD44", "SOX2", "NANOG", "POU5F1",  # OCT4 = POU5F1
+  "BDNF", "NLGN3", "DAB2IP"
+)
+
+# Load cBioPortal dataset
+
+data <- read.delim(
+  "/Users/al/PATH40060-Precision Oncology/data_mrna_seq_v2_rsem_zscores_ref_all_samples.txt",
+  comment.char = "#",
+  header = TRUE,
+  sep = "\t",
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+# Extract gene names
+
+if ("Hugo_Symbol" %in% colnames(data)) { 
+  dataset_genes <- data$Hugo_Symbol
+} else {
+  dataset_genes <- rownames(data)
+}
+
+# Clean gene names
+
+dataset_genes <- toupper(trimws(dataset_genes))
+genes_of_interest <- toupper(genes_of_interest)
+
+# Find genes
+
+genes_found <- genes_of_interest[genes_of_interest %in% dataset_genes] 
+genes_missing <- setdiff(genes_of_interest, dataset_genes)
+
+# Output results
+
+cat("Genes found:\n") 
+print(genes_found)
+
+cat("\nGenes missing:\n")
+print(genes_missing)
+```
+```{r}
+hypoxia_genes <- c("VEGFA", "CA9", "BIRC5", "SLC2A1", "ADM", "PDK1") # Define groups of genes
+stemness_genes <- c("PROM1", "CD44", "SOX2", "NANOG", "POU5F1")
+invasion_genes <- c("BDNF", "NLGN3", "DAB2IP")
+```
+
+```{r}
+
+# Remove missing gene symbols
+
+data <- data[!is.na(data$Hugo_Symbol) & data$Hugo_Symbol != "", ]
+
+# Remove duplicate genes
+
+data <- data[!duplicated(data$Hugo_Symbol), ]
+
+# Set rownames
+
+rownames(data) <- data$Hugo_Symbol
+
+# Extract expression matrix (remove annotation columns)
+
+expr <- data[, !(colnames(data) %in% c("Hugo_Symbol", "Entrez_Gene_Id"))]
+
+# Convert to numeric matrix
+
+expr <- as.matrix(expr)
+mode(expr) <- "numeric"
+```
+
+
+```{r}
+
+# Convert sample IDs to patient IDs
+
+expr_patient_ids <- substr(colnames(expr), 1, 12)
+
+# Replace column names
+
+colnames(expr) <- expr_patient_ids
+```
+
+
+```{r}
+
+# Load clinical data
+
+clinical <- read.delim(
+  "/Users/al/PATH40060-Precision Oncology/data_clinical_patient.txt",
+  comment.char = "#",
+  header = TRUE,
+  sep = "\t",
+  stringsAsFactors = FALSE,
+  fill = TRUE,
+  quote = ""
+)
+```
+
+
+```{r}
+
+# Load survival data
+
+clinical$OS_MONTHS <- as.numeric(clinical$OS_MONTHS)
+
+clinical$OS_STATUS <- ifelse(
+  grepl("DECEASED", clinical$OS_STATUS, ignore.case = TRUE),
+  1, 0
+)
+
+# Remove missing survival
+
+clinical <- clinical[!is.na(clinical$OS_MONTHS) & !is.na(clinical$OS_STATUS), ]
+```
+
+
+```{r}
+
+# Match samples
+
+common_ids <- intersect(colnames(expr), clinical$PATIENT_ID)
+
+# Check overlap
+
+cat("Number of matched patients:", length(common_ids), "\n")
+
+# Subset
+
+expr <- expr[, common_ids]
+clinical <- clinical[match(common_ids, clinical$PATIENT_ID), ]
+```
+
+
+```{r}
+
+# Extract genes
+
+all_genes <- unique(c(hypoxia_genes, stemness_genes, invasion_genes))
+all_genes <- intersect(all_genes, rownames(expr))
+
+expr_subset <- expr[all_genes, , drop = FALSE]
+```
+
+
+```{r}
+
+# Build processed dataset
+
+expr_df <- as.data.frame(t(expr_subset))
+expr_df$PATIENT_ID <- rownames(expr_df)
+
+merged_data <- merge(expr_df, clinical, by = "PATIENT_ID")
+```
+
+
+```{r}
+
+# Checking for processed dataset
+
+cat("\nFinal dataset dimensions:\n")
+print(dim(merged_data))
+
+cat("\nGenes in analysis:\n")
+print(colnames(merged_data)[colnames(merged_data) %in% all_genes])
+
+```
+
+```{r}
+
+# Keep only genes that exist in dataset for hypoxia group
+
+hypoxia_genes <- intersect(hypoxia_genes, colnames(merged_data))
+```
+
+
+
